@@ -4,6 +4,9 @@
   "private": true,
   "description": "Separated backend API server for vue-sample",
   "main": "src/server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js"

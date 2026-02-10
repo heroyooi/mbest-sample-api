@@ -5,6 +5,7 @@ const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 
 const app = express();
+const isVercel = process.env.VERCEL === "1";
 const PORT = Number(process.env.PORT) || 4000;
 
 app.use(cors({ origin: true }));
@@ -33,7 +34,8 @@ const validatePostInput = (body) => {
   return { ok: true, value: { title, content } };
 };
 
-const dbDirectory = path.join(__dirname, "..", "data");
+const dataRootDirectory = isVercel ? "/tmp" : path.join(__dirname, "..");
+const dbDirectory = path.join(dataRootDirectory, "data");
 const dbPath = path.join(dbDirectory, "app.db");
 fs.mkdirSync(dbDirectory, { recursive: true });
 
@@ -237,4 +239,8 @@ const startServer = (port, retriesLeft = 10) => {
   });
 };
 
-startServer(PORT);
+if (require.main === module) {
+  startServer(PORT);
+}
+
+module.exports = app;
