@@ -59,7 +59,7 @@ if (postCount === 0) {
   const seedStatement = db.prepare(
     "INSERT INTO posts (title, content, created_at, updated_at) VALUES (?, ?, ?, ?)"
   );
-  seedStatement.run("첫 번째 글", "Vue + Pinia CRUD 예시를 위한 샘플 데이터입니다.", now, now);
+  seedStatement.run("첫 번째 글", "CRUD 예시를 위한 샘플 데이터입니다.", now, now);
   seedStatement.run("두 번째 글", "목록/상세/쓰기/수정/삭제 라우트를 확인해보세요.", now, now);
   seedStatement.run("세 번째 글", "SQLite 저장소라 서버 재시작 후에도 데이터가 유지됩니다.", now, now);
 }
