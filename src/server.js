@@ -1,4 +1,4 @@
-const express = require("express");
+﻿const express = require("express");
 const cors = require("cors");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -26,10 +26,10 @@ const validatePostInput = (body) => {
   const content = String(body?.content || "").trim();
 
   if (!title) {
-    return { ok: false, error: "title은 필수입니다." };
+    return { ok: false, error: "title is required." };
   }
   if (!content) {
-    return { ok: false, error: "content는 필수입니다." };
+    return { ok: false, error: "content is required." };
   }
   return { ok: true, value: { title, content } };
 };
@@ -51,6 +51,15 @@ db.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
 
 const postCount = db.prepare("SELECT COUNT(*) AS count FROM posts").get().count;
@@ -59,14 +68,55 @@ if (postCount === 0) {
   const seedStatement = db.prepare(
     "INSERT INTO posts (title, content, created_at, updated_at) VALUES (?, ?, ?, ?)"
   );
-  seedStatement.run("첫 번째 글", "CRUD 예시를 위한 샘플 데이터입니다.", now, now);
-  seedStatement.run("두 번째 글", "목록/상세/쓰기/수정/삭제 라우트를 확인해보세요.", now, now);
-  seedStatement.run("세 번째 글", "SQLite 저장소라 서버 재시작 후에도 데이터가 유지됩니다.", now, now);
+  seedStatement.run("First post", "This is sample seed data for CRUD demo.", now, now);
+  seedStatement.run("Second post", "Try list/detail/create/edit/delete flow.", now, now);
+  seedStatement.run("Third post", "Data is persisted in SQLite database.", now, now);
 }
+
+const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
+if (userCount === 0) {
+  const now = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO users (name, email, password, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+  ).run("Demo User", "demo@sample.com", "1234", now, now);
+}
+
+const mapUser = (row) => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  createdAt: row.createdAt
+});
+
+const createToken = (user) => {
+  return Buffer.from(`${user.id}:${user.email}:${Date.now()}`).toString("base64url");
+};
+
+const parseToken = (token) => {
+  try {
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    const [idRaw, email] = decoded.split(":");
+    const id = Number(idRaw);
+    if (!Number.isInteger(id) || !email) {
+      return null;
+    }
+    return { id, email };
+  } catch {
+    return null;
+  }
+};
+
+const readBearerToken = (req) => {
+  const header = String(req.headers.authorization || "");
+  if (!header.startsWith("Bearer ")) {
+    return null;
+  }
+  return header.slice("Bearer ".length).trim();
+};
 
 app.get("/api/health", (req, res) => {
   return sendSuccess(res, {
-    service: "vue-sample-backend",
+    service: "sample-backend",
     sqlite: dbPath,
     now: new Date().toISOString()
   });
@@ -89,7 +139,7 @@ app.get("/api/posts/:id", (req, res) => {
   const id = parseId(req.params.id);
 
   if (!Number.isInteger(id)) {
-    return sendError(res, "유효한 id가 아닙니다.", 422);
+    return sendError(res, "Invalid id.", 422);
   }
 
   try {
@@ -100,7 +150,7 @@ app.get("/api/posts/:id", (req, res) => {
       .get(id);
 
     if (!post) {
-      return sendError(res, "게시글을 찾을 수 없습니다.", 404);
+      return sendError(res, "Post not found.", 404);
     }
 
     return sendSuccess(res, post);
@@ -136,7 +186,7 @@ app.post("/api/posts", (req, res) => {
 app.put("/api/posts/:id", (req, res) => {
   const id = parseId(req.params.id);
   if (!Number.isInteger(id)) {
-    return sendError(res, "유효한 id가 아닙니다.", 422);
+    return sendError(res, "Invalid id.", 422);
   }
 
   const validation = validatePostInput(req.body);
@@ -151,7 +201,7 @@ app.put("/api/posts/:id", (req, res) => {
       .run(validation.value.title, validation.value.content, now, id);
 
     if (result.changes === 0) {
-      return sendError(res, "게시글을 찾을 수 없습니다.", 404);
+      return sendError(res, "Post not found.", 404);
     }
 
     const updatedPost = db
@@ -169,15 +219,106 @@ app.put("/api/posts/:id", (req, res) => {
 app.delete("/api/posts/:id", (req, res) => {
   const id = parseId(req.params.id);
   if (!Number.isInteger(id)) {
-    return sendError(res, "유효한 id가 아닙니다.", 422);
+    return sendError(res, "Invalid id.", 422);
   }
 
   try {
     const result = db.prepare("DELETE FROM posts WHERE id = ?").run(id);
     if (result.changes === 0) {
-      return sendError(res, "게시글을 찾을 수 없습니다.", 404);
+      return sendError(res, "Post not found.", 404);
     }
     return sendSuccess(res, { id });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+});
+
+app.post("/api/auth/signup", (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const password = String(req.body?.password || "").trim();
+
+  if (!name || !email || !password) {
+    return sendError(res, "name, email, password are required.", 422);
+  }
+
+  try {
+    const exists = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+    if (exists) {
+      return sendError(res, "This email is already registered.", 409);
+    }
+
+    const now = new Date().toISOString();
+    const created = db
+      .prepare(
+        "INSERT INTO users (name, email, password, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+      )
+      .run(name, email, password, now, now);
+
+    const user = db
+      .prepare("SELECT id, name, email, created_at AS createdAt FROM users WHERE id = ?")
+      .get(created.lastInsertRowid);
+
+    return sendSuccess(
+      res,
+      {
+        token: createToken(user),
+        user: mapUser(user)
+      },
+      201
+    );
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+});
+
+app.post("/api/auth/login", (req, res) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const password = String(req.body?.password || "").trim();
+
+  if (!email || !password) {
+    return sendError(res, "email and password are required.", 422);
+  }
+
+  try {
+    const user = db
+      .prepare("SELECT id, name, email, password, created_at AS createdAt FROM users WHERE email = ?")
+      .get(email);
+
+    if (!user || user.password !== password) {
+      return sendError(res, "Invalid email or password.", 401);
+    }
+
+    return sendSuccess(res, {
+      token: createToken(user),
+      user: mapUser(user)
+    });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const token = readBearerToken(req);
+  if (!token) {
+    return sendError(res, "Bearer token is required.", 401);
+  }
+
+  const claims = parseToken(token);
+  if (!claims) {
+    return sendError(res, "Invalid token.", 401);
+  }
+
+  try {
+    const user = db
+      .prepare("SELECT id, name, email, created_at AS createdAt FROM users WHERE id = ? AND email = ?")
+      .get(claims.id, claims.email);
+
+    if (!user) {
+      return sendError(res, "Invalid token.", 401);
+    }
+
+    return sendSuccess(res, { user: mapUser(user) });
   } catch (error) {
     return sendError(res, error.message, 500);
   }
@@ -196,7 +337,7 @@ app.post("/api/sum", (req, res) => {
   const b = Number(req.body?.b);
 
   if (!Number.isFinite(a) || !Number.isFinite(b)) {
-    return sendError(res, "a, b는 숫자여야 합니다.", 422);
+    return sendError(res, "a and b must be numbers.", 422);
   }
 
   return sendSuccess(res, {
@@ -207,11 +348,11 @@ app.post("/api/sum", (req, res) => {
 });
 
 app.get("/api/fail", (req, res) => {
-  return sendError(res, "의도적으로 실패를 반환하는 API입니다.", 500);
+  return sendError(res, "This endpoint always fails for demo.", 500);
 });
 
 app.use((req, res) => {
-  return sendError(res, "존재하지 않는 API 경로입니다.", 404);
+  return sendError(res, "API route not found.", 404);
 });
 
 const startServer = (port, retriesLeft = 10) => {
@@ -229,9 +370,7 @@ const startServer = (port, retriesLeft = 10) => {
     }
 
     if (error.code === "EADDRINUSE") {
-      console.error(
-        `[backend] port ${port} is already in use. Try: set PORT=5000 && npm run dev`
-      );
+      console.error(`[backend] port ${port} is already in use. Try: set PORT=5000 && npm run dev`);
       process.exit(1);
     }
 
